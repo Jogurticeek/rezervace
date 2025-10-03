@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Rezervační systém DOD – ZŠ (Meziboří / Most)</title>
+<style>
+  :root{
+    --bg:#f6f7fb; --card:#ffffff; --accent:#0b72ff; --muted:#6b7280; --ok:#059669; --danger:#db2777;
+    font-family:Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  }
+  body{margin:0;background:var(--bg);color:#111;padding:24px;}
+  header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px;}
+  h1{margin:0;font-size:20px;}
+  p.lead{margin:4px 0 0;color:var(--muted);font-size:13px;}
+  .wrap{display:grid;grid-template-columns:1fr 380px;gap:18px;align-items:start;}
+  .card{background:var(--card);border-radius:12px;padding:16px;box-shadow:0 6px 18px rgba(11,15,30,0.05);}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+  button{background:var(--accent);color:#fff;border:0;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:600;}
+  button.ghost{background:transparent;color:var(--accent);border:1px solid rgba(11,114,255,0.12);}
+  .small{padding:6px 8px;font-size:13px}
+  .slots{display:flex;flex-direction:column;gap:8px;max-height:72vh;padding-right:8px;overflow:auto;}
+  .slot{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px;border-radius:10px;border:1px solid #eef2ff}
+  .slot .left{display:flex;gap:12px;align-items:center}
+  .meta{font-size:13px;color:var(--muted)}
+  .badge{padding:6px 8px;border-radius:999px;font-size:12px;background:#eff6ff;color:var(--accent);font-weight:700}
+  .status-free{color:var(--ok);font-weight:700}
+  .status-taken{color:var(--danger);font-weight:700}
+  form{display:flex;flex-direction:column;gap:10px}
+  label{font-size:13px;color:var(--muted)}
+  input, select, textarea{padding:8px;border-radius:8px;border:1px solid #e6e9f2;font-size:14px}
+  .rightcol .section{margin-bottom:14px}
+  .help{font-size:13px;color:var(--muted)}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:8px;border-bottom:1px solid #f1f5f9;text-align:left;font-size:13px}
+  .tiny{font-size:12px;color:var(--muted)}
+  .center{text-align:center}
+  footer{margin-top:18px;color:var(--muted);font-size:13px}
+  @media (max-width:900px){
+    .wrap{grid-template-columns:1fr; padding-bottom:60px}
+    .rightcol{position:relative;z-index:1}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Rezervační systém DOD – ZŠ</h1>
+    <p class="lead">Meziboří (90 min) / Most (60 min) — každé časové okno může být rezervováno jen 1×.</p>
+  </div>
+  <div class="tiny">Místní data ukládána v prohlížeči (localStorage)</div>
+</header>
+
+<div class="wrap">
+  <!-- levá část: seznam termínů -->
+  <div class="card">
+    <div class="controls">
+      <button id="btn-show-all" class="small">Zobrazit všechny</button>
+      <button id="btn-show-free" class="small ghost">Ukázat volné</button>
+      <button id="btn-show-taken" class="small ghost">Ukázat obsazené</button>
+      <button id="btn-export" class="small">Export rezervací (CSV)</button>
+      <button id="btn-import" class="small ghost">Import CSV</button>
+      <input id="file-input" type="file" accept=".csv" style="display:none">
+    </div>
+
+    <div id="slots" class="slots" aria-live="polite"></div>
+  </div>
+
+  <!-- pravá část: formuláře -->
+  <aside class="card rightcol">
+    <div class="section">
+      <h3 style="margin:0 0 8px 0">Rychlá rezervace</h3>
+      <p class="help">Vyber termín vlevo a klikni na "Rezervovat". Nebo použij admin panel níže pro import termínů.</p>
+
+      <form id="reserve-form">
+        <label for="selected-slot">Vybraný termín</label>
+        <input id="selected-slot" name="selected_slot" readonly placeholder="Žádný vybraný" />
+
+        <label for="school">Název školy *</label>
+        <input id="school" name="school" required placeholder="ZŠ Např. U Parku" />
+
+        <label for="teacher">Jméno učitele/čky *</label>
+        <input id="teacher" name="teacher" required placeholder="Jméno a příjmení" />
+
+        <label for="note">Poznámka (volitelné)</label>
+        <textarea id="note" rows="2" placeholder="Požadavky, počet žáků apod."></textarea>
+
+        <div style="display:flex;gap:8px">
+          <button type="button" id="btn-reserve" class="small">Rezervovat</button>
+          <button type="button" id="btn-cancel-res" class="small ghost">Zrušit rezervaci</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="section">
+      <h3 style="margin:0 0 8px 0">Admin – přidat / import termíny</h3>
+      <p class="help">Vlož termíny ručně (CSV) nebo použij tlačítko pro předvyplnění ukázky.</p>
+
+      <label for="csv-area">CSV (Datum, Město, Čas) — řádky např. <span class="tiny">2025-10-15,Meziboří,09:00</span></label>
+      <textarea id="csv-area" rows="5" placeholder="Vlož CSV sem..."></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button id="btn-import-area" class="small">Načíst z oblasti</button>
+        <button id="btn-fill-sample" class="small ghost">Naplnit ukázku</button>
+        <button id="btn-clear-all" class="small" style="background:#f97316">Vymazat vše</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3 style="margin:0 0 8px 0">Přehled rezervací</h3>
+      <div id="reservations-overview" style="max-height:180px;overflow:auto"></div>
+    </div>
+
+    <div class="section">
+      <h3 style="margin:0 0 8px 0">Nápověda</h3>
+      <ul class="tiny">
+        <li>Meziboří – délka prohlídky 90 minut (automaticky).</li>
+        <li>Most – délka prohlídky 60 minut (automaticky).</li>
+        <li>Každý řádek v CSV importu: <code>YYYY-MM-DD,Město,HH:MM</code></li>
+        <li>Po rezervaci se termín označí jako obsazený a nelze jej rezervovat znovu.</li>
+        <li>Exportuješ pouze obsazené termíny (CSV).</li>
+      </ul>
+    </div>
+  </aside>
+</div>
+
+<footer class="card" style="margin-top:12px">
+  <strong>Dokumentace (stručně)</strong>
+  <p class="tiny" style="margin:6px 0 0 0">
+    Tento malý systém běží lokálně v prohlížeči. Data jsou uložena do localStorage → pokud chceš sdílet tabulku mezi více osobami, exportuj CSV a pošlete administrátorovi, který data naimportuje do centrálního systému.
+  </p>
+</footer>
+
+<script>
+/* ====== Data model a utilky ====== */
+const STORAGE_KEY_SLOTS = 'dod_slots_v1';
+const STORAGE_KEY_RES = 'dod_reservations_v1';
+
+/* výchozí termíny (ukázka) */
+const SAMPLE_SLOTS = [
+  {date:'2025-10-15', city:'Meziboří', time:'09:00'},
+  {date:'2025-10-15', city:'Meziboří', time:'11:00'},
+  {date:'2025-10-15', city:'Most', time:'10:00'},
+  {date:'2025-10-15', city:'Most', time:'11:00'},
+  {date:'2025-10-16', city:'Most', time:'09:00'},
+  {date:'2025-10-16', city:'Meziboří', time:'12:00'}
+];
+
+/* délka podle města */
+function durationForCity(city) {
+  city = (city||'').toLowerCase();
+  if (city.includes('mezibo')) return 90;
+  if (city.includes('most')) return 60;
+  return 60;
+}
+
+/* ulož / načti slots (termíny bez rezervací) */
+function loadSlots(){
+  const raw = localStorage.getItem(STORAGE_KEY_SLOTS);
+  if (!raw) return [];
+  try { return JSON.parse(raw); } catch(e){ return []; }
+}
+function saveSlots(slots){
+  localStorage.setItem(STORAGE_KEY_SLOTS, JSON.stringify(slots));
+}
+
+/* rezervace (pro konkrétní slot) */
+function loadReservations(){
+  const raw = localStorage.getItem(STORAGE_KEY_RES);
+  if (!raw) return {};
+  try { return JSON.parse(raw); } catch(e){ return {}; }
+}
+function saveReservations(obj){
+  localStorage.setItem(STORAGE_KEY_RES, JSON.stringify(obj));
+}
+
+/* pomocné: identifikátor slotu (date|city|time) */
+function slotId(s){ return `${s.date}|${s.city}|${s.time}` }
+
+/* inicializace — pokud prázdné, naplnit ukázkou */
+if (loadSlots().length === 0) {
+  saveSlots(SAMPLE_SLOTS);
+}
+/* ====== UI rendering ====== */
+const slotsEl = document.getElementById('slots');
+const reservationsOverview = document.getElementById('reservations-overview');
+const selectedInput = document.getElementById('selected-slot');
+
+let selectedSlot = null;
+
+function renderSlots(filter='all'){
+  const slots = loadSlots().slice().sort((a,b) => {
+    if (a.date !== b.date) return a.date.localeCompare(b.date);
+    if (a.time !== b.time) return a.time.localeCompare(b.time);
+    return a.city.localeCompare(b.city);
+  });
+  const res = loadReservations();
+  slotsEl.innerHTML = '';
+  if (slots.length === 0){
+    slotsEl.innerHTML = '<div class="tiny help">Žádné termíny. Použij admin panel k importu nebo naplň ukázku.</div>';
+    renderReservations();
+    return;
+  }
+
+  slots.forEach((s, idx) => {
+    const id = slotId(s);
+    const taken = res[id] !== undefined;
+    if (filter === 'free' && taken) return;
+    if (filter === 'taken' && !taken) return;
+
+    const div = document.createElement('div');
+    div.className = 'slot';
+    const left = document.createElement('div'); left.className='left';
+    const badge = document.createElement('div'); badge.className='badge';
+    badge.textContent = s.city;
+    const info = document.createElement('div');
+    const title = document.createElement('div'); title.textContent = `${s.date} • ${s.time}`;
+    title.style.fontWeight='700';
+    const meta = document.createElement('div');
+    meta.className='meta';
+    meta.innerHTML = `Délka: ${durationForCity(s.city)} min • ID: <span class="tiny">${id}</span>`;
+    info.appendChild(title);
+    info.appendChild(meta);
+    left.appendChild(badge); left.appendChild(info);
+
+    const right = document.createElement('div'); right.style.display='flex'; right.style.gap='8px'; right.style.alignItems='center';
+
+    const status = document.createElement('div');
+    if (!taken) {
+      status.innerHTML = `<span class="status-free">VOLNÝ</span>`;
+    } else {
+      const r = res[id];
+      status.innerHTML = `<span class="status-taken">OBSAZENO</span><div class="tiny">${r.school} — ${r.teacher}</div>`;
+    }
+
+    const btnSelect = document.createElement('button');
+    btnSelect.className='small ghost';
+    btnSelect.textContent = 'Vybrat';
+    btnSelect.onclick = () => {
+      selectedSlot = s;
+      selectedInput.value = `${s.date} | ${s.city} | ${s.time}`;
+      // scroll to form
+      document.getElementById('school').focus();
+    };
+
+    const btnReserve = document.createElement('button');
+    btnReserve.className='small';
+    btnReserve.textContent = taken ? 'Upravit' : 'Rezervovat';
+    btnReserve.onclick = () => {
+      selectedSlot = s;
+      selectedInput.value = `${s.date} | ${s.city} | ${s.time}`;
+      const r = res[id];
+      if (r) {
+        document.getElementById('school').value = r.school || '';
+        document.getElementById('teacher').value = r.teacher || '';
+        document.getElementById('note').value = r.note || '';
+      } else {
+        document.getElementById('school').value = '';
+        document.getElementById('teacher').value = '';
+        document.getElementById('note').value = '';
+      }
+      document.getElementById('school').focus();
+    };
+
+    const btnCancel = document.createElement('button');
+    btnCancel.className='small ghost';
+    btnCancel.style.background='transparent';
+    btnCancel.textContent = 'Zrušit';
+    btnCancel.onclick = () => {
+      if (!taken) { alert('Tento termín není obsazen.'); return; }
+      if (!confirm('Opravdu chcete zrušit rezervaci tohoto termínu?')) return;
+      deleteReservation(id);
+    };
+
+    right.appendChild(status);
+    right.appendChild(btnSelect);
+    right.appendChild(btnReserve);
+    right.appendChild(btnCancel);
+
+    div.appendChild(left);
+    div.appendChild(right);
+    slotsEl.appendChild(div);
+  });
+
+  renderReservations();
+}
+
+function renderReservations(){
+  const res = loadReservations();
+  const keys = Object.keys(res).sort();
+  if (keys.length === 0) {
+    reservationsOverview.innerHTML = '<div class="tiny">Žádné rezervace.</div>';
+    return;
+  }
+  const tbl = document.createElement('table');
+  const header = document.createElement('thead');
+  header.innerHTML = '<tr><th>Datum</th><th>Město</th><th>Čas</th><th>Škola</th><th>Učitel</th><th class="center">Pozn.</th></tr>';
+  tbl.appendChild(header);
+  const body = document.createElement('tbody');
+  keys.forEach(key => {
+    const r = res[key];
+    const [date,city,time] = key.split('|');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${date}</td><td>${city}</td><td>${time}</td><td>${r.school}</td><td>${r.teacher}</td><td class="tiny center">${r.note||''}</td>`;
+    body.appendChild(tr);
+  });
+  tbl.appendChild(body);
+  reservationsOverview.innerHTML = '';
+  reservationsOverview.appendChild(tbl);
+}
+
+/* ====== rezervace / zrušení ====== */
+function reserveSelected(){
+  if (!selectedSlot) { alert('Nejdřív vyberte termín vlevo (Vybrat / Rezervovat).'); return; }
+  const school = document.getElementById('school').value.trim();
+  const teacher = document.getElementById('teacher').value.trim();
+  const note = document.getElementById('note').value.trim();
+  if (!school || !teacher) { alert('Vyplňte prosím název školy a jméno učitele.'); return; }
+  const id = slotId(selectedSlot);
+  const res = loadReservations();
+  if (res[id]) {
+    if (!confirm('Tento termín je již obsazen. Chcete přepsat rezervaci?')) return;
+  }
+  res[id] = { school, teacher, note, created: new Date().toISOString() };
+  saveReservations(res);
+  alert('Rezervace uložena.');
+  renderSlots(currentFilter);
+}
+
+function deleteReservation(id){
+  const res = loadReservations();
+  if (res[id]) {
+    delete res[id];
+    saveReservations(res);
+    alert('Rezervace zrušena.');
+    renderSlots(currentFilter);
+  }
+}
+
+/* ====== import / export CSV ====== */
+function exportReservationsCSV(){
+  const res = loadReservations();
+  const keys = Object.keys(res);
+  if (keys.length === 0) { alert('Žádné rezervace k exportu.'); return; }
+  const lines = [['Datum','Město','Čas','Délka (min)','Škola','Učitel','Poznámka']];
+  keys.forEach(k => {
+    const [date,city,time] = k.split('|');
+    const r = res[k];
+    lines.push([date,city,time,durationForCity(city), r.school, r.teacher, r.note || '']);
+  });
+  const csv = lines.map(r => r.map(field => `"${String(field).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `reservations_${(new Date()).toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* načíst CSV ze souboru (upload) */
+function handleFileInput(file){
+  const reader = new FileReader();
+  reader.onload = () => {
+    const text = reader.result;
+    importCSVSlots(text);
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+/* CSV parser (jednoduchý) - očekává: Datum,Město,Čas (délka volitelně) */
+function importCSVSlots(csvText){
+  const lines = csvText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length>0);
+  if (lines.length === 0) { alert('Prázdný soubor.'); return; }
+  const slots = loadSlots();
+  const added = [];
+  lines.forEach(line => {
+    // umožní oddělovače ; nebo ,
+    const parts = line.split(/[,;]+/).map(p => p.trim());
+    if (parts.length < 3) return;
+    const [date, city, time] = parts;
+    // validace date/time jednoduchá:
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return;
+    // zamezit duplicitám (v rámci slots)
+    const exists = slots.some(s => s.date===date && s.city===city && s.time===time);
+    if (!exists) {
+      slots.push({date, city, time});
+      added.push(`${date} ${city} ${time}`);
+    }
+  });
+  saveSlots(slots);
+  alert(`Import dokončen. Přidáno: ${added.length} termínů.`);
+  renderSlots(currentFilter);
+}
+
+/* import z oblasti textarea */
+document.getElementById('btn-import-area').addEventListener('click', () => {
+  const text = document.getElementById('csv-area').value.trim();
+  if (!text) { alert('Vlož CSV do textové oblasti.'); return; }
+  importCSVSlots(text);
+});
+
+/* naplnit sample */
+document.getElementById('btn-fill-sample').addEventListener('click', () => {
+  if (!confirm('Nahradit existující termíny ukázkovými?')) return;
+  saveSlots(SAMPLE_SLOTS);
+  renderSlots(currentFilter);
+});
+
+/* clear all slots + reservations */
+document.getElementById('btn-clear-all').addEventListener('click', () => {
+  if (!confirm('Opravdu vymazat VŠECHNY termíny a rezervace?')) return;
+  saveSlots([]);
+  saveReservations({});
+  renderSlots();
+});
+
+/* export */
+document.getElementById('btn-export').addEventListener('click', exportReservationsCSV);
+
+/* import file */
+const fileInput = document.getElementById('file-input');
+document.getElementById('btn-import').addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', (e) => {
+  const f = e.target.files[0];
+  if (f) handleFileInput(f);
+  fileInput.value = '';
+});
+
+/* reserve / cancel from form */
+document.getElementById('btn-reserve').addEventListener('click', reserveSelected);
+document.getElementById('btn-cancel-res').addEventListener('click', () => {
+  if (!selectedSlot) { alert('Vyberte nejdříve termín.'); return; }
+  const id = slotId(selectedSlot);
+  if (!loadReservations()[id]) { alert('Tento termín není obsazený.'); return; }
+  if (!confirm('Opravdu zrušit rezervaci?')) return;
+  deleteReservation(id);
+});
+
+/* filtrování z levé části */
+let currentFilter = 'all';
+document.getElementById('btn-show-all').addEventListener('click', () => { currentFilter='all'; renderSlots('all'); });
+document.getElementById('btn-show-free').addEventListener('click', () => { currentFilter='free'; renderSlots('free'); });
+document.getElementById('btn-show-taken').addEventListener('click', () => { currentFilter='taken'; renderSlots('taken'); });
+
+/* utility delete by id (used by export or UI) */
+function deleteReservationByKey(key){
+  const res = loadReservations();
+  if (res[key]) { delete res[key]; saveReservations(res); renderSlots(currentFilter); }
+}
+
+/* inicialní render */
+renderSlots();
+
+/* pomocná funkce: vytvoří identifikátor */
+function slotId(s){ return `${s.date}|${s.city}|${s.time}` }
+</script>
+
+</body>
+</html>
